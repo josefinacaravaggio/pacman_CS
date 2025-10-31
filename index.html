@@ -1,9 +1,9 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="es">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Pac-Quiz (simulación)</title>
+<title>Pac-Quiz</title>
 <style>
   :root{
     --tile:28px;
@@ -27,15 +27,31 @@
   .small{ font-size:12px; color:#9e9e9e;}
   .pill{ display:inline-block; padding:6px 8px; background:#222; border-radius:6px; margin:4px 0; color:#fff;}
   footer{ margin-top:12px; color:#9e9e9e; font-size:13px;}
+
+  /* --- Pantalla de pregunta --- */
+  #questionScreen {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    color: #ffeb3b;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: 2.5em;
+    padding: 40px;
+    z-index: 999;
+    cursor: pointer;
+  }
 </style>
 </head>
 <body>
-  <h1>Pac-Quiz — movimiento con flechas • 5 preguntas</h1>
+  <h1>Pac-Quiz • Ciencias Naturales</h1>
   <div id="gameWrap">
     <canvas id="game" width="calc(var(--cols) * var(--tile))" height="calc(var(--rows) * var(--tile))" style="width:var(--width);height:var(--height)"></canvas>
     <div id="hud" class="panel">
       <div class="info"><strong>Puntos:</strong> <span id="score">0</span></div>
-      <div class="info"><strong>Preguntas pendientes:</strong> <span id="remaining">5</span></div>
+      <div class="info"><strong>Preguntas pendientes:</strong> <span id="remaining">0</span></div>
       <div class="controls">
         <div class="small">Controles: <span class="pill">Flechas</span></div>
         <hr style="border:none;border-top:1px solid #222;margin:8px 0">
@@ -51,16 +67,11 @@
     </div>
   </div>
 
-<script>
-/*
-  Pac-Quiz: simple grid-based pacman simulation.
-  - Arrow keys to move.
-  - 5 special pellets show an alert with the questions supplied by the user.
-  - Small ghosts move randomly. Collision resets player to start.
-*/
+  <!-- Pantalla para mostrar la pregunta -->
+  <div id="questionScreen" onclick="closeQuestion()"></div>
 
-// --------- Configuration ----------
-const TILE = 28;            // px
+<script>
+const TILE = 28;
 const COLS = 19;
 const ROWS = 13;
 const canvas = document.getElementById('game');
@@ -79,61 +90,76 @@ const QUESTIONS = [
   "Decime tres cosas para las que sirve el agua en la sociedad"
 ];
 
-// map legend:
-// 0 = empty / corridor
-// 1 = wall
-// 2 = pellet (small dot)
-// 3 = question pellet (special)
+// mapa (cada 3 = pregunta)
 let map = [
-  // 19 columns each row
   [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-  [1,2,2,2,1,2,2,2,2,2,2,2,1,2,2,2,2,2,1],
+  [1,2,2,2,1,2,2,2,2,3,2,2,1,2,3,2,2,2,1],
   [1,2,1,2,1,2,1,1,1,2,1,1,1,2,1,2,1,2,1],
-  [1,3,1,2,2,2,2,3,1,2,1,3,2,2,2,2,1,3,1],
+  [1,3,1,2,2,2,2,1,1,2,1,2,2,2,2,2,1,2,1],
   [1,2,1,1,1,2,1,1,1,2,1,1,1,2,1,1,1,2,1],
   [1,2,2,2,1,2,2,2,2,2,2,2,1,2,2,2,2,2,1],
   [1,1,1,2,1,1,1,1,1,0,1,1,1,1,1,2,1,1,1],
   [1,2,2,2,2,2,2,2,1,2,1,2,2,2,2,2,2,2,1],
   [1,2,1,1,1,2,1,2,1,2,1,2,1,2,1,1,1,2,1],
-  [1,2,1,3,1,2,1,2,2,2,2,2,1,2,1,3,1,2,1],
+  [1,2,1,2,1,2,1,2,2,2,2,2,1,2,1,1,1,2,1],
   [1,2,2,2,1,2,2,2,1,1,1,2,2,2,2,2,2,2,1],
-  [1,2,1,2,1,1,1,2,2,3,2,2,1,1,1,2,1,2,1],
+  [1,2,1,3,1,1,1,2,2,2,2,2,1,3,1,2,1,2,1],
   [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 ];
 
-// Convert 0 tiles to pellets to make corridor consistent (or keep as empty)
+// reemplazar posibles 0 por 2 (pellet) para que el mapa inicial sea consistente
 for(let r=0;r<ROWS;r++){
   for(let c=0;c<COLS;c++){
     if(map[r][c] === 0) map[r][c] = 2;
   }
 }
 
-// Player state
-const player = {
-  x: 1, y: 1,
-  dir: {x:0,y:0}, // current movement
-  nextDir: {x:0,y:0},
-  radius: TILE*0.42,
-  mouth: 0.2 // mouth openness 0..0.5
-};
+// --- construir mapeo fijo de preguntas (coordenada -> índice) ---
+const questionIndexMap = {};
+let initialQuestionCount = 0;
+for (let r = 0; r < ROWS; r++) {
+  for (let c = 0; c < COLS; c++) {
+    if (map[r][c] === 3) {
+      questionIndexMap[`${r},${c}`] = initialQuestionCount;
+      initialQuestionCount++;
+    }
+  }
+}
 
-// Score & questions
+// si QUESTIONS no coincide con la cantidad encontrada, avisamos y adaptamos
+let QUESTIONS_USED = QUESTIONS;
+if (QUESTIONS.length !== initialQuestionCount) {
+  console.warn('Número de preguntas (QUESTIONS) distinto al número de tiles 3 en el mapa:', QUESTIONS.length, initialQuestionCount);
+  // adaptamos: si hay más preguntas en QUESTIONS que tiles en el mapa, recortamos;
+  // si hay menos, mantenemos QUESTIONS (al recoger preguntaremos por índice existente)
+  if (initialQuestionCount <= QUESTIONS.length) {
+    QUESTIONS_USED = QUESTIONS.slice(0, initialQuestionCount);
+  } else {
+    // hay más tiles de pregunta que preguntas definidas: rellenamos con texto genérico
+    QUESTIONS_USED = QUESTIONS.slice();
+    for(let i=QUESTIONS.length;i<initialQuestionCount;i++){
+      QUESTIONS_USED.push(`Pregunta ${i+1}`);
+    }
+  }
+}
+
+let collected = new Array(initialQuestionCount).fill(false);
+let remainingQuestions = initialQuestionCount;
+remainingEl.textContent = remainingQuestions;
+
+const player = { x:1, y:1, dir:{x:0,y:0}, nextDir:{x:0,y:0}, radius:TILE*0.42, mouth:0.2 };
+
 let score = 0;
-let remainingQuestions = QUESTIONS.length;
-let collected = new Array(QUESTIONS.length).fill(false);
 
-// Ghosts (simple)
 const ghosts = [
-  {x: 9, y: 5, color:'#ff6b6b', dir:{x:1,y:0}, speed:0.12},
-  {x: 9, y: 7, color:'#6b8cff', dir:{x:-1,y:0}, speed:0.10}
+  {x:9, y:5, color:'#ff6b6b', dir:{x:1,y:0}, speed:0.12},
+  {x:9, y:7, color:'#6b8cff', dir:{x:-1,y:0}, speed:0.10}
 ];
 
-// Helper
 function tileIsWall(r,c){ return map[r] && map[r][c] === 1; }
-function tileIsPellet(r,c){ return map[r] && (map[r][c] === 2); }
-function tileIsQuestion(r,c){ return map[r] && (map[r][c] === 3); }
+function tileIsPellet(r,c){ return map[r] && map[r][c] === 2; }
+function tileIsQuestion(r, c){ return map[r] && map[r][c] === 3; }
 
-// keyboard
 window.addEventListener('keydown', e=>{
   const k = e.key;
   if(k === 'ArrowLeft') player.nextDir = {x:-1,y:0};
@@ -142,9 +168,7 @@ window.addEventListener('keydown', e=>{
   if(k === 'ArrowDown') player.nextDir = {x:0,y:1};
 });
 
-// Game loop
 let last = 0;
-let accumulator = 0;
 function loop(ts){
   if(!last) last = ts;
   const dt = (ts - last) / 1000;
@@ -155,58 +179,61 @@ function loop(ts){
 }
 requestAnimationFrame(loop);
 
-// Update
+// --- funciones para pantalla final ---
+function showEndScreen() {
+  questionScreen.textContent = `¡Felicitaciones! Terminaste las ${QUESTIONS_USED.length} preguntas.\nPuntaje total: ${score}`;
+  questionScreen.style.display = 'flex';
+}
+
+
 function update(dt){
-  // Move player smoothly tile-based
-  // Attempt to change dir if possible
+  // aplicar cambio de dirección si posible
   if(canMove(player.x + player.nextDir.x, player.y + player.nextDir.y)){
     player.dir = {...player.nextDir};
   }
-  // step movement: tiny increments per frame so it's smooth
-  const speed = 6.2 * dt; // tiles per second scaled
-  // Try to move in current dir
+
+  const speed = 6.2 * dt;
   if(canMove(player.x + player.dir.x*speed, player.y + player.dir.y*speed)){
     player.x += player.dir.x * speed;
     player.y += player.dir.y * speed;
   } else {
-    // stop when hitting wall
     player.dir = {x:0,y:0};
   }
 
-  // Eat pellet when centered in tile
-  const px = Math.round(player.x);
-  const py = Math.round(player.y);
-  if(tileIsPellet(py,px)){
-    map[py][px] = 0;
-    score += 10;
-    scoreEl.textContent = score;
-  }
-  if(tileIsQuestion(py,px)){
-    // Find which question index this tile corresponds to
-    // We'll mark it collected and replace tile with 0
-    // Find Nth question tile order to map to QUESTIONS array
-    const qIndex = questionIndexAt(py, px);
-    if(qIndex !== -1 && !collected[qIndex]){
-      collected[qIndex] = true;
-      map[py][px] = 0;
-      remainingQuestions--;
-      remainingEl.textContent = remainingQuestions;
-      // show alert with question
-      setTimeout(()=> {
-        alert("Pregunta:\n\n" + QUESTIONS[qIndex]);
-      }, 10);
-      score += 50;
+  // detección consistente de celda central y recoger objetos (pellets/preguntas)
+  const centerX = Math.floor(player.x + 0.5);
+  const centerY = Math.floor(player.y + 0.5);
+  const dx = Math.abs(player.x - centerX);
+  const dy = Math.abs(player.y - centerY);
+  const threshold = 0.45; // área central de la celda
+
+  if (dx < threshold && dy < threshold) {
+    // Pellets
+    if(tileIsPellet(centerY, centerX)){
+      map[centerY][centerX] = 0;
+      score += 10;
       scoreEl.textContent = score;
     }
+    // Preguntas
+if(tileIsQuestion(centerY, centerX)){
+  const qIndex = questionIndexAt(centerY, centerX);
+  if(qIndex !== -1 && !collected[qIndex]){
+    collected[qIndex] = true;
+    map[centerY][centerX] = 0; // remover ícono de pregunta
+    remainingQuestions--;
+    remainingEl.textContent = remainingQuestions;
+    score += 50;
+    scoreEl.textContent = score;
+    setTimeout(()=> { showQuestion(QUESTIONS[qIndex]); }, 10);
   }
 
-  // Ghost movement (random walking within corridors)
+}
+
+  }
+
+  // fantasmas
   ghosts.forEach(g=>{
-    // Move ghost
-    const ghostSpeed = g.speed; // tiles per second
-    // pick direction occasionally
     if(Math.random() < 0.02){
-      // choose random valid direction
       const options = [];
       [[1,0],[-1,0],[0,1],[0,-1]].forEach(d=>{
         const nx = Math.round(g.x + d[0]);
@@ -215,48 +242,33 @@ function update(dt){
       });
       if(options.length) g.dir = options[Math.floor(Math.random()*options.length)];
     }
-    // attempt move
-    if(!tileIsWall(Math.round(g.y + g.dir.y * ghostSpeed), Math.round(g.x + g.dir.x * ghostSpeed))){
-      g.x += g.dir.x * ghostSpeed;
-      g.y += g.dir.y * ghostSpeed;
+    if(!tileIsWall(Math.round(g.y + g.dir.y * g.speed), Math.round(g.x + g.dir.x * g.speed))){
+      g.x += g.dir.x * g.speed;
+      g.y += g.dir.y * g.speed;
     } else {
-      // reverse or choose new
       g.dir = {x:-g.dir.x, y:-g.dir.y};
     }
 
-    // collision with player? check distance
-    const dx = (g.x - player.x);
-    const dy = (g.y - player.y);
-    if(Math.hypot(dx,dy) < 0.7){
-      // reset player position
-      player.x = 1;
-      player.y = 1;
+    const dxg = (g.x - player.x);
+    const dyg = (g.y - player.y);
+    if(Math.hypot(dxg,dyg) < 0.7){
+      player.x = 1; player.y = 1;
       player.dir = {x:0,y:0};
       player.nextDir = {x:0,y:0};
-      // small penalty
       score = Math.max(0, score - 30);
       scoreEl.textContent = score;
     }
   });
 
-  // animate mouth
   player.mouth += dt * 3;
   if(player.mouth > 0.6) player.mouth = 0.0;
 }
 
-// Can move to fractional coords? Check center of destination tile is not wall.
 function canMove(nx, ny){
-  // we'll test collision with walls using the center of the pacman ghost
-  const cx = nx;
-  const cy = ny;
-  // ensure inside grid
+  const cx = nx, cy = ny;
   if(cx < 0 || cy < 0 || cx >= COLS || cy >= ROWS) return false;
-  // check the four corners of bounding box small radius
   const checkOffsets = [
-    {x: -0.3, y:-0.3},
-    {x: 0.3,  y:-0.3},
-    {x: -0.3, y:0.3},
-    {x: 0.3,  y:0.3}
+    {x:-0.3,y:-0.3},{x:0.3,y:-0.3},{x:-0.3,y:0.3},{x:0.3,y:0.3}
   ];
   for(const off of checkOffsets){
     const tx = Math.floor(cx + off.x + 0.5);
@@ -266,47 +278,26 @@ function canMove(nx, ny){
   return true;
 }
 
-// Determine index of question pellet at tile (py,px) by scanning map's question tiles in reading order
+// usar mapeo fijo para no depender del mapa mutable
 function questionIndexAt(py, px){
-  let idx = -1, count = 0;
-  for(let r=0;r<ROWS;r++){
-    for(let c=0;c<COLS;c++){
-      if(map[r][c] === 3){
-        if(r === py && c === px){
-          idx = count;
-          return idx;
-        }
-        count++;
-      }
-    }
-  }
-  // It's possible map was mutated; if not found in current map, fallback to find original positions (we stored original above).
-  // To make it robust, we will reconstruct original positions by scanning the original layout declared in source:
-  // For simplicity, if not found, map indices 0..QUESTIONS.length-1 in order of (4th row, etc).
-  return idx;
+  const key = `${py},${px}`;
+  return (key in questionIndexMap) ? questionIndexMap[key] : -1;
 }
 
-// Drawing
 function draw(){
-  // clear
   ctx.clearRect(0,0,canvas.width, canvas.height);
 
-  // draw map: walls and pellets
   for(let r=0;r<ROWS;r++){
     for(let c=0;c<COLS;c++){
       const x = c * TILE;
       const y = r * TILE;
       const cell = map[r][c];
       if(cell === 1){
-        // wall
         ctx.fillStyle = '#001d3d';
         ctx.fillRect(x, y, TILE, TILE);
-        // small bevel
         ctx.strokeStyle = '#003366';
         ctx.strokeRect(x+1, y+1, TILE-2, TILE-2);
       } else {
-        // corridor - black already
-        // pellets
         if(cell === 2){
           ctx.fillStyle = '#ffd54f';
           const px = x + TILE/2;
@@ -315,7 +306,6 @@ function draw(){
           ctx.arc(px, py, TILE*0.08, 0, Math.PI*2);
           ctx.fill();
         } else if(cell === 3){
-          // question pellet (bigger and blue)
           ctx.fillStyle = '#4dd0e1';
           const px = x + TILE/2;
           const py = y + TILE/2;
@@ -332,11 +322,9 @@ function draw(){
     }
   }
 
-  // draw ghosts
   ghosts.forEach(g=>{
     const gx = g.x * TILE + TILE/2;
     const gy = g.y * TILE + TILE/2;
-    // body
     ctx.save();
     ctx.translate(gx, gy);
     ctx.beginPath();
@@ -344,7 +332,6 @@ function draw(){
     ctx.arc(0, -TILE*0.15, TILE*0.36, Math.PI, 0, false);
     ctx.rect(-TILE*0.36, -TILE*0.15, TILE*0.72, TILE*0.36 + TILE*0.15);
     ctx.fill();
-    // eyes
     ctx.fillStyle = '#fff';
     ctx.beginPath(); ctx.ellipse(-TILE*0.13, -TILE*0.05, TILE*0.08, TILE*0.12, 0, 0, Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.ellipse(TILE*0.13, -TILE*0.05, TILE*0.08, TILE*0.12, 0, 0, Math.PI*2); ctx.fill();
@@ -354,10 +341,8 @@ function draw(){
     ctx.restore();
   });
 
-  // draw player (Pac-Man)
   const px = player.x * TILE + TILE/2;
   const py = player.y * TILE + TILE/2;
-  // determine direction angle
   let angle = 0;
   if(player.dir.x === -1) angle = Math.PI;
   else if(player.dir.x === 1) angle = 0;
@@ -379,8 +364,42 @@ function draw(){
   ctx.fill();
   ctx.restore();
 }
-</script>
 
-<footer class="small">Hecho para GitHub Pages — archivo único (index.html). ¡Disfrutalo!</footer>
+// --- funciones para pantalla de pregunta ---
+const questionScreen = document.getElementById('questionScreen');
+
+function showQuestion(text) {
+  questionScreen.textContent = text;
+  questionScreen.style.display = 'flex';
+}
+
+function closeQuestion() {
+  questionScreen.style.display = 'none';
+  // Si no quedan preguntas pendientes, mostrar la pantalla final
+  if(remainingQuestions === 0){
+    setTimeout(() => {
+      questionScreen.textContent = `¡Felicitaciones! Terminaste las 5 preguntas.\nPuntaje total: ${score}`;
+      questionScreen.style.display = 'flex';
+    }, 100);
+  }
+}
+
+// Click con el mouse
+questionScreen.addEventListener('click', closeQuestion);
+
+// Barra espaciadora
+window.addEventListener('keydown', e => {
+  if(e.code === 'Space' && questionScreen.style.display === 'flex'){
+    e.preventDefault(); // evita que la página haga scroll
+    closeQuestion();
+  }
+});
+
+</script>
+<footer class="small" style="text-align:center;">
+  ¡Disfrutalo!<br>
+  Josefina * Bautista * Matias
+</footer>
+
 </body>
 </html>
