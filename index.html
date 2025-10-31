@@ -1,0 +1,405 @@
+﻿<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Pac-Quiz</title>
+<style>
+  :root{
+    --tile:28px;
+    --cols:19;
+    --rows:13;
+    --width: calc(var(--cols) * var(--tile));
+    --height: calc(var(--rows) * var(--tile));
+  }
+  body{ 
+    display:flex; flex-direction:column; align-items:center; gap:12px;
+    background:#000; color:#fff; font-family:system-ui,Segoe UI,Roboto,Arial;
+    min-height:100vh; margin:0; padding:20px;
+  }
+  h1{ margin:0; font-size:20px; color:#ffeb3b; text-shadow:0 0 8px #ffeb3b66}
+  #gameWrap{ display:flex; gap:14px; align-items:flex-start;}
+  canvas{ background:#000; image-rendering:pixelated; border:6px solid #222; box-shadow:0 0 20px #000 inset;}
+  #hud{ width:260px; font-size:14px; }
+  .panel{ background:#111; padding:10px; border-radius:8px; box-shadow:0 6px 18px #000; }
+  .info{ margin-bottom:8px; color:#ddd;}
+  .controls{ font-size:13px; color:#bbb; }
+  .small{ font-size:12px; color:#9e9e9e;}
+  .pill{ display:inline-block; padding:6px 8px; background:#222; border-radius:6px; margin:4px 0; color:#fff;}
+  footer{ margin-top:12px; color:#9e9e9e; font-size:13px;}
+
+  /* --- Pantalla de pregunta --- */
+  #questionScreen {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    color: #ffeb3b;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: 2.5em;
+    padding: 40px;
+    z-index: 999;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+  <h1>Pac-Quiz • Ciencias Naturales</h1>
+  <div id="gameWrap">
+    <canvas id="game" width="calc(var(--cols) * var(--tile))" height="calc(var(--rows) * var(--tile))" style="width:var(--width);height:var(--height)"></canvas>
+    <div id="hud" class="panel">
+      <div class="info"><strong>Puntos:</strong> <span id="score">0</span></div>
+      <div class="info"><strong>Preguntas pendientes:</strong> <span id="remaining">0</span></div>
+      <div class="controls">
+        <div class="small">Controles: <span class="pill">Flechas</span></div>
+        <hr style="border:none;border-top:1px solid #222;margin:8px 0">
+        <div><strong>Preguntas (se muestran al recoger):</strong></div>
+        <ol class="small" id="qList">
+          <li>¿Cómo se forman las cataratas?</li>
+          <li>Mencioná tres recursos de la Argentina</li>
+          <li>¿Qué diferencia hay entre el agua dulce y la salada?</li>
+          <li>¿Cómo se llama el mar que bordea la Argentina?</li>
+          <li>Decime tres cosas para las que sirve el agua en la sociedad</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pantalla para mostrar la pregunta -->
+  <div id="questionScreen" onclick="closeQuestion()"></div>
+
+<script>
+const TILE = 28;
+const COLS = 19;
+const ROWS = 13;
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+canvas.width = COLS * TILE;
+canvas.height = ROWS * TILE;
+
+const scoreEl = document.getElementById('score');
+const remainingEl = document.getElementById('remaining');
+
+const QUESTIONS = [
+  "¿Cómo se forman las cataratas?",
+  "Mencioná tres recursos de la Argentina",
+  "¿Qué diferencia hay entre el agua dulce y la salada?",
+  "¿Cómo se llama el mar que bordea la Argentina?",
+  "Decime tres cosas para las que sirve el agua en la sociedad"
+];
+
+// mapa (cada 3 = pregunta)
+let map = [
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,2,2,2,1,2,2,2,2,3,2,2,1,2,3,2,2,2,1],
+  [1,2,1,2,1,2,1,1,1,2,1,1,1,2,1,2,1,2,1],
+  [1,3,1,2,2,2,2,1,1,2,1,2,2,2,2,2,1,2,1],
+  [1,2,1,1,1,2,1,1,1,2,1,1,1,2,1,1,1,2,1],
+  [1,2,2,2,1,2,2,2,2,2,2,2,1,2,2,2,2,2,1],
+  [1,1,1,2,1,1,1,1,1,0,1,1,1,1,1,2,1,1,1],
+  [1,2,2,2,2,2,2,2,1,2,1,2,2,2,2,2,2,2,1],
+  [1,2,1,1,1,2,1,2,1,2,1,2,1,2,1,1,1,2,1],
+  [1,2,1,2,1,2,1,2,2,2,2,2,1,2,1,1,1,2,1],
+  [1,2,2,2,1,2,2,2,1,1,1,2,2,2,2,2,2,2,1],
+  [1,2,1,3,1,1,1,2,2,2,2,2,1,3,1,2,1,2,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+];
+
+// reemplazar posibles 0 por 2 (pellet) para que el mapa inicial sea consistente
+for(let r=0;r<ROWS;r++){
+  for(let c=0;c<COLS;c++){
+    if(map[r][c] === 0) map[r][c] = 2;
+  }
+}
+
+// --- construir mapeo fijo de preguntas (coordenada -> índice) ---
+const questionIndexMap = {};
+let initialQuestionCount = 0;
+for (let r = 0; r < ROWS; r++) {
+  for (let c = 0; c < COLS; c++) {
+    if (map[r][c] === 3) {
+      questionIndexMap[`${r},${c}`] = initialQuestionCount;
+      initialQuestionCount++;
+    }
+  }
+}
+
+// si QUESTIONS no coincide con la cantidad encontrada, avisamos y adaptamos
+let QUESTIONS_USED = QUESTIONS;
+if (QUESTIONS.length !== initialQuestionCount) {
+  console.warn('Número de preguntas (QUESTIONS) distinto al número de tiles 3 en el mapa:', QUESTIONS.length, initialQuestionCount);
+  // adaptamos: si hay más preguntas en QUESTIONS que tiles en el mapa, recortamos;
+  // si hay menos, mantenemos QUESTIONS (al recoger preguntaremos por índice existente)
+  if (initialQuestionCount <= QUESTIONS.length) {
+    QUESTIONS_USED = QUESTIONS.slice(0, initialQuestionCount);
+  } else {
+    // hay más tiles de pregunta que preguntas definidas: rellenamos con texto genérico
+    QUESTIONS_USED = QUESTIONS.slice();
+    for(let i=QUESTIONS.length;i<initialQuestionCount;i++){
+      QUESTIONS_USED.push(`Pregunta ${i+1}`);
+    }
+  }
+}
+
+let collected = new Array(initialQuestionCount).fill(false);
+let remainingQuestions = initialQuestionCount;
+remainingEl.textContent = remainingQuestions;
+
+const player = { x:1, y:1, dir:{x:0,y:0}, nextDir:{x:0,y:0}, radius:TILE*0.42, mouth:0.2 };
+
+let score = 0;
+
+const ghosts = [
+  {x:9, y:5, color:'#ff6b6b', dir:{x:1,y:0}, speed:0.12},
+  {x:9, y:7, color:'#6b8cff', dir:{x:-1,y:0}, speed:0.10}
+];
+
+function tileIsWall(r,c){ return map[r] && map[r][c] === 1; }
+function tileIsPellet(r,c){ return map[r] && map[r][c] === 2; }
+function tileIsQuestion(r, c){ return map[r] && map[r][c] === 3; }
+
+window.addEventListener('keydown', e=>{
+  const k = e.key;
+  if(k === 'ArrowLeft') player.nextDir = {x:-1,y:0};
+  if(k === 'ArrowRight') player.nextDir = {x:1,y:0};
+  if(k === 'ArrowUp') player.nextDir = {x:0,y:-1};
+  if(k === 'ArrowDown') player.nextDir = {x:0,y:1};
+});
+
+let last = 0;
+function loop(ts){
+  if(!last) last = ts;
+  const dt = (ts - last) / 1000;
+  last = ts;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// --- funciones para pantalla final ---
+function showEndScreen() {
+  questionScreen.textContent = `¡Felicitaciones! Terminaste las ${QUESTIONS_USED.length} preguntas.\nPuntaje total: ${score}`;
+  questionScreen.style.display = 'flex';
+}
+
+
+function update(dt){
+  // aplicar cambio de dirección si posible
+  if(canMove(player.x + player.nextDir.x, player.y + player.nextDir.y)){
+    player.dir = {...player.nextDir};
+  }
+
+  const speed = 6.2 * dt;
+  if(canMove(player.x + player.dir.x*speed, player.y + player.dir.y*speed)){
+    player.x += player.dir.x * speed;
+    player.y += player.dir.y * speed;
+  } else {
+    player.dir = {x:0,y:0};
+  }
+
+  // detección consistente de celda central y recoger objetos (pellets/preguntas)
+  const centerX = Math.floor(player.x + 0.5);
+  const centerY = Math.floor(player.y + 0.5);
+  const dx = Math.abs(player.x - centerX);
+  const dy = Math.abs(player.y - centerY);
+  const threshold = 0.45; // área central de la celda
+
+  if (dx < threshold && dy < threshold) {
+    // Pellets
+    if(tileIsPellet(centerY, centerX)){
+      map[centerY][centerX] = 0;
+      score += 10;
+      scoreEl.textContent = score;
+    }
+    // Preguntas
+if(tileIsQuestion(centerY, centerX)){
+  const qIndex = questionIndexAt(centerY, centerX);
+  if(qIndex !== -1 && !collected[qIndex]){
+    collected[qIndex] = true;
+    map[centerY][centerX] = 0; // remover ícono de pregunta
+    remainingQuestions--;
+    remainingEl.textContent = remainingQuestions;
+    score += 50;
+    scoreEl.textContent = score;
+    setTimeout(()=> { showQuestion(QUESTIONS[qIndex]); }, 10);
+  }
+
+}
+
+  }
+
+  // fantasmas
+  ghosts.forEach(g=>{
+    if(Math.random() < 0.02){
+      const options = [];
+      [[1,0],[-1,0],[0,1],[0,-1]].forEach(d=>{
+        const nx = Math.round(g.x + d[0]);
+        const ny = Math.round(g.y + d[1]);
+        if(!tileIsWall(ny,nx)) options.push({x:d[0], y:d[1]});
+      });
+      if(options.length) g.dir = options[Math.floor(Math.random()*options.length)];
+    }
+    if(!tileIsWall(Math.round(g.y + g.dir.y * g.speed), Math.round(g.x + g.dir.x * g.speed))){
+      g.x += g.dir.x * g.speed;
+      g.y += g.dir.y * g.speed;
+    } else {
+      g.dir = {x:-g.dir.x, y:-g.dir.y};
+    }
+
+    const dxg = (g.x - player.x);
+    const dyg = (g.y - player.y);
+    if(Math.hypot(dxg,dyg) < 0.7){
+      player.x = 1; player.y = 1;
+      player.dir = {x:0,y:0};
+      player.nextDir = {x:0,y:0};
+      score = Math.max(0, score - 30);
+      scoreEl.textContent = score;
+    }
+  });
+
+  player.mouth += dt * 3;
+  if(player.mouth > 0.6) player.mouth = 0.0;
+}
+
+function canMove(nx, ny){
+  const cx = nx, cy = ny;
+  if(cx < 0 || cy < 0 || cx >= COLS || cy >= ROWS) return false;
+  const checkOffsets = [
+    {x:-0.3,y:-0.3},{x:0.3,y:-0.3},{x:-0.3,y:0.3},{x:0.3,y:0.3}
+  ];
+  for(const off of checkOffsets){
+    const tx = Math.floor(cx + off.x + 0.5);
+    const ty = Math.floor(cy + off.y + 0.5);
+    if(map[ty] && map[ty][tx] === 1) return false;
+  }
+  return true;
+}
+
+// usar mapeo fijo para no depender del mapa mutable
+function questionIndexAt(py, px){
+  const key = `${py},${px}`;
+  return (key in questionIndexMap) ? questionIndexMap[key] : -1;
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width, canvas.height);
+
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const x = c * TILE;
+      const y = r * TILE;
+      const cell = map[r][c];
+      if(cell === 1){
+        ctx.fillStyle = '#001d3d';
+        ctx.fillRect(x, y, TILE, TILE);
+        ctx.strokeStyle = '#003366';
+        ctx.strokeRect(x+1, y+1, TILE-2, TILE-2);
+      } else {
+        if(cell === 2){
+          ctx.fillStyle = '#ffd54f';
+          const px = x + TILE/2;
+          const py = y + TILE/2;
+          ctx.beginPath();
+          ctx.arc(px, py, TILE*0.08, 0, Math.PI*2);
+          ctx.fill();
+        } else if(cell === 3){
+          ctx.fillStyle = '#4dd0e1';
+          const px = x + TILE/2;
+          const py = y + TILE/2;
+          ctx.beginPath();
+          ctx.arc(px, py, TILE*0.28, 0, Math.PI*2);
+          ctx.fill();
+          ctx.fillStyle = '#002';
+          ctx.font = `${TILE*0.28}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('?', px, py+1);
+        }
+      }
+    }
+  }
+
+  ghosts.forEach(g=>{
+    const gx = g.x * TILE + TILE/2;
+    const gy = g.y * TILE + TILE/2;
+    ctx.save();
+    ctx.translate(gx, gy);
+    ctx.beginPath();
+    ctx.fillStyle = g.color;
+    ctx.arc(0, -TILE*0.15, TILE*0.36, Math.PI, 0, false);
+    ctx.rect(-TILE*0.36, -TILE*0.15, TILE*0.72, TILE*0.36 + TILE*0.15);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.ellipse(-TILE*0.13, -TILE*0.05, TILE*0.08, TILE*0.12, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(TILE*0.13, -TILE*0.05, TILE*0.08, TILE*0.12, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath(); ctx.arc(-TILE*0.13, -TILE*0.02, TILE*0.03, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(TILE*0.13, -TILE*0.02, TILE*0.03, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  });
+
+  const px = player.x * TILE + TILE/2;
+  const py = player.y * TILE + TILE/2;
+  let angle = 0;
+  if(player.dir.x === -1) angle = Math.PI;
+  else if(player.dir.x === 1) angle = 0;
+  else if(player.dir.y === -1) angle = -Math.PI/2;
+  else if(player.dir.y === 1) angle = Math.PI/2;
+
+  const mouthOpen = 0.25 + Math.abs(Math.sin(player.mouth)) * 0.25;
+  const start = mouthOpen * Math.PI;
+  const end = -mouthOpen * Math.PI;
+
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate(angle);
+  ctx.beginPath();
+  ctx.fillStyle = '#ffeb3b';
+  ctx.moveTo(0,0);
+  ctx.arc(0,0, player.radius, start, end, false);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+// --- funciones para pantalla de pregunta ---
+const questionScreen = document.getElementById('questionScreen');
+
+function showQuestion(text) {
+  questionScreen.textContent = text;
+  questionScreen.style.display = 'flex';
+}
+
+function closeQuestion() {
+  questionScreen.style.display = 'none';
+  // Si no quedan preguntas pendientes, mostrar la pantalla final
+  if(remainingQuestions === 0){
+    setTimeout(() => {
+      questionScreen.textContent = `¡Felicitaciones! Terminaste las 5 preguntas.\nPuntaje total: ${score}`;
+      questionScreen.style.display = 'flex';
+    }, 100);
+  }
+}
+
+// Click con el mouse
+questionScreen.addEventListener('click', closeQuestion);
+
+// Barra espaciadora
+window.addEventListener('keydown', e => {
+  if(e.code === 'Space' && questionScreen.style.display === 'flex'){
+    e.preventDefault(); // evita que la página haga scroll
+    closeQuestion();
+  }
+});
+
+</script>
+<footer class="small" style="text-align:center;">
+  ¡Disfrutalo!<br>
+  Josefina * Bautista * Matias
+</footer>
+
+</body>
+</html>
